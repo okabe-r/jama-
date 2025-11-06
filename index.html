@@ -373,7 +373,6 @@ footer {
     .bab-name { font-size: 1.05em; }
 }
 </style>
-<link rel="stylesheet" href="/index.css">
 </head>
 <body>
     <div id="root"></div>
@@ -391,7 +390,6 @@ const toArabicNumerals = (num) => {
 const normalizeArabic = (text) => {
   if (!text) return '';
   return text
-    .replace(/<br\s*\/?>/gi, " ") // Replace <br> with space
     .replace(/[\u064B-\u0652]/g, "") // Remove harakat
     .replace(/[أإآ]/g, "ا")
     .replace(/ة/g, "ه")
@@ -400,17 +398,23 @@ const normalizeArabic = (text) => {
     .trim();
 };
 
-const diffChars = (oldStr, newStr) => {
-    const oldNormalized = normalizeArabic(oldStr);
-    const newNormalized = normalizeArabic(newStr);
+const diffWords = (oldStr, newStr) => {
+    const cleanOldStr = oldStr.replace(/<br\s*\/?>/gi, " ");
+    const cleanNewStr = newStr.replace(/<br\s*\/?>/gi, " ");
 
-    const m = oldNormalized.length;
-    const n = newNormalized.length;
+    const punctuationRegex = /[.,()\[\]\/#!$؟%\^&\*;:{}=_`~،؛«»﴿﴾ﷺ●-]/g;
+    const normalizeWordForDiff = (word) => normalizeArabic(word).replace(punctuationRegex, '');
+
+    const oldWords = cleanOldStr.split(/\s+/).filter(Boolean);
+    const newWords = cleanNewStr.split(/\s+/).filter(Boolean);
+
+    const m = oldWords.length;
+    const n = newWords.length;
     const dp = Array(m + 1).fill(0).map(() => Array(n + 1).fill(0));
 
     for (let i = 1; i <= m; i++) {
         for (let j = 1; j <= n; j++) {
-            if (oldNormalized[i - 1] === newNormalized[j - 1]) {
+            if (normalizeWordForDiff(oldWords[i - 1]) === normalizeWordForDiff(newWords[j - 1])) {
                 dp[i][j] = dp[i - 1][j - 1] + 1;
             } else {
                 dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
@@ -418,33 +422,38 @@ const diffChars = (oldStr, newStr) => {
         }
     }
 
-    const charDiffs = [];
+    const wordDiffs = [];
     let i = m, j = n;
     while (i > 0 || j > 0) {
-        if (i > 0 && j > 0 && oldNormalized[i - 1] === newNormalized[j - 1]) {
-            charDiffs.unshift({ value: newNormalized[j - 1], type: 'correct' });
+        if (i > 0 && j > 0 && normalizeWordForDiff(oldWords[i - 1]) === normalizeWordForDiff(newWords[j - 1])) {
+            wordDiffs.unshift({ value: oldWords[i - 1], type: 'correct' });
             i--;
             j--;
         } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-            charDiffs.unshift({ value: newNormalized[j - 1], type: 'added' });
+            wordDiffs.unshift({ value: newWords[j - 1], type: 'added' });
             j--;
         } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
-            charDiffs.unshift({ value: oldNormalized[i - 1], type: 'missing' });
+            wordDiffs.unshift({ value: oldWords[i - 1], type: 'missing' });
             i--;
         } else {
             break;
         }
     }
     
-    if (charDiffs.length === 0) return [];
+    if (wordDiffs.length === 0) {
+        const result = [];
+        if (oldWords.length > 0) result.push({ value: oldWords.join(' '), type: 'missing'});
+        if (newWords.length > 0) result.push({ value: newWords.join(' '), type: 'added'});
+        return result;
+    }
 
     const groupedResult = [];
-    let currentPart = { ...charDiffs[0] };
+    let currentPart = { ...wordDiffs[0] };
 
-    for (let k = 1; k < charDiffs.length; k++) {
-        const nextPart = charDiffs[k];
+    for (let k = 1; k < wordDiffs.length; k++) {
+        const nextPart = wordDiffs[k];
         if (nextPart.type === currentPart.type) {
-            currentPart.value += nextPart.value;
+            currentPart.value += ' ' + nextPart.value;
         } else {
             groupedResult.push(currentPart);
             currentPart = { ...nextPart };
@@ -481,7 +490,7 @@ const TranscriptionModal = ({ cardData, onClose }) => {
     }, [onClose]);
 
     const handleCorrection = () => {
-        const diffResult = diffChars(cardData.backText, userInput);
+        const diffResult = diffWords(cardData.backText, userInput);
         setComparison(diffResult);
     };
 
@@ -491,10 +500,14 @@ const TranscriptionModal = ({ cardData, onClose }) => {
     };
 
     const renderComparison = (diff, type) => {
+        if (!diff) return null;
         return diff.map((part, index) => {
             if (type === 'user' && part.type === 'missing') return null;
             if (type === 'original' && part.type === 'added') return null;
-            return React.createElement('span', { key: index, className: `diff-${part.type}` }, part.value);
+            
+            const className = `diff-${part.type}`;
+
+            return React.createElement('span', { key: index, className: className }, part.value + ' ');
         });
     };
 
@@ -755,6 +768,5 @@ if (container) {
     root.render(React.createElement(App));
 }
 </script>
-<script type="module" src="/index.tsx"></script>
 </body>
 </html>
