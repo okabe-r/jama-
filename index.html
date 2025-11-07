@@ -326,9 +326,8 @@ button:disabled {
     color: var(--text-main);
 }
 
-.modal-content textarea {
+.modal-content textarea, .modal-content input[type="number"] {
     width: 100%;
-    height: 200px;
     font-family: inherit;
     font-size: 1.1em;
     padding: 15px;
@@ -336,6 +335,14 @@ button:disabled {
     border-radius: var(--border-radius);
     margin-bottom: 20px;
     resize: vertical;
+}
+
+.modal-content textarea {
+    height: 200px;
+}
+
+.modal-content input[type="number"] {
+    text-align: center;
 }
 
 .modal-close-button {
@@ -374,6 +381,16 @@ button:disabled {
 .diff-correct { color: var(--diff-correct); }
 .diff-missing { background-color: var(--diff-missing-bg); color: var(--diff-missing-text); text-decoration: line-through; padding: 2px 4px; border-radius: 3px;}
 .diff-added { background-color: var(--diff-added-bg); color: var(--diff-added-text); padding: 2px 4px; border-radius: 3px; }
+
+.test-card-front {
+    border: 1px solid var(--card-front-border);
+    background-color: var(--card-front-bg);
+    color: var(--card-front-text);
+    padding: 18px;
+    border-radius: var(--border-radius);
+    margin-bottom: 20px;
+    text-align: center;
+}
 
 
 footer {
@@ -486,6 +503,186 @@ const diffWords = (oldStr, newStr) => {
     return groupedResult;
 };
 
+const renderComparison = (diff, type) => {
+    if (!diff) return null;
+    return diff.map((part, index) => {
+        if (type === 'user' && part.type === 'missing') return null;
+        if (type === 'original' && part.type === 'added') return null;
+        
+        const className = `diff-${part.type}`;
+
+        return React.createElement('span', { key: index, className: className }, part.value + ' ');
+    });
+};
+
+
+const RecitationTestFlow = ({ allHadiths, processedHadiths, onClose }) => {
+    const [stage, setStage] = useState('inputStartId'); // 'inputStartId', 'testBab', 'testHadith'
+    const [currentTestId, setCurrentTestId] = useState(null);
+    const [idInput, setIdInput] = useState('');
+    const [userInput, setUserInput] = useState('');
+    const [comparison, setComparison] = useState(null);
+    const modalRef = useRef(null);
+    const [history, setHistory] = useState([]);
+
+    useEffect(() => {
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') onClose();
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        document.body.style.overflow = 'hidden';
+        if (modalRef.current) modalRef.current.focus();
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            document.body.style.overflow = 'auto';
+        };
+    }, [onClose]);
+
+    const currentHadith = useMemo(() => currentTestId ? allHadiths.find(h => h.id === currentTestId) : null, [currentTestId, allHadiths]);
+    const processedCardData = useMemo(() => currentTestId ? processedHadiths.find(h => h.id === currentTestId) : null, [currentTestId, processedHadiths]);
+    const isLastHadithInBab = useMemo(() => {
+        if (!currentHadith) return false;
+        const nextHadith = allHadiths.find(h => h.id === currentHadith.id + 1);
+        return !nextHadith || nextHadith.bab !== currentHadith.bab;
+    }, [currentHadith, allHadiths]);
+
+    const handleStartTest = () => {
+        const id = parseInt(idInput, 10);
+        if (isNaN(id) || !allHadiths.some(h => h.id === id)) {
+            alert('الرجاء إدخال رقم حديث صحيح.');
+            return;
+        }
+        setCurrentTestId(id);
+        setStage('testBab');
+    };
+
+    const handleCorrection = () => {
+        const correctText = stage === 'testBab' ? currentHadith.bab : currentHadith.text;
+        const diffResult = diffWords(correctText, userInput);
+        setComparison(diffResult);
+    };
+
+    const handleTryAgain = () => {
+        setComparison(null);
+        setUserInput('');
+    };
+
+    const handleNext = () => {
+        setHistory(prev => [...prev, { stage, currentTestId }]);
+        setComparison(null);
+        setUserInput('');
+        if (stage === 'testBab') {
+            setStage('testHadith');
+        } else if (stage === 'testHadith') {
+            if (isLastHadithInBab) {
+                const nextId = currentTestId + 1;
+                if (allHadiths.some(h => h.id === nextId)) {
+                    setCurrentTestId(nextId);
+                    setStage('testBab');
+                } else {
+                    alert('أحسنت، لقد أكملت الاختبار!');
+                    onClose();
+                }
+            } else {
+                setCurrentTestId(currentTestId + 1);
+            }
+        }
+    };
+    
+    const handleBack = () => {
+        if (history.length > 0) {
+            const lastState = history[history.length - 1];
+            setStage(lastState.stage);
+            setCurrentTestId(lastState.currentTestId);
+            setHistory(prev => prev.slice(0, -1));
+            setComparison(null);
+            setUserInput('');
+        }
+    };
+
+    const renderContent = () => {
+        if (stage === 'inputStartId') {
+            return React.createElement(React.Fragment, null,
+                React.createElement('h3', null, 'بدء اختبار الحفظ'),
+                React.createElement('p', { className: 'bab-reference' }, 'ادخل رقم الحديث الذي تريد أن تبدأ منه'),
+                React.createElement('input', {
+                    type: 'number',
+                    value: idInput,
+                    onChange: e => setIdInput(e.target.value),
+                    placeholder: 'رقم الحديث',
+                    'aria-label': 'رقم الحديث للبدء'
+                }),
+                React.createElement('div', { className: 'modal-actions' },
+                    React.createElement('button', { className: 'section-button', onClick: handleStartTest }, 'ابدأ الاختبار')
+                )
+            );
+        }
+
+        if (comparison) {
+            const originalTextLabel = stage === 'testBab' ? 'اسم الباب الصحيح' : 'الإجابة الصحيحة (بدون حركات)';
+            const nextButtonText = stage === 'testBab' ? 'الحديث التالي' : (isLastHadithInBab ? 'الباب التالي' : 'الحديث التالي');
+            return React.createElement('div', { className: 'comparison-view' },
+                React.createElement('h4', null, 'إجابتك'),
+                React.createElement('p', null, renderComparison(comparison, 'user')),
+                React.createElement('h4', null, originalTextLabel),
+                React.createElement('p', null, renderComparison(comparison, 'original')),
+                React.createElement('div', { className: 'modal-actions' },
+                    React.createElement('button', { className: 'info-button', onClick: handleTryAgain }, 'حاول مرة أخرى'),
+                    React.createElement('button', { className: 'section-button', onClick: handleNext }, nextButtonText)
+                )
+            );
+        }
+
+        if (stage === 'testBab') {
+            return React.createElement(React.Fragment, null,
+                React.createElement('h3', null, `اكتب اسم الباب للحديث رقم ${toArabicNumerals(currentTestId)}`),
+                React.createElement('textarea', {
+                    value: userInput,
+                    onChange: e => setUserInput(e.target.value),
+                    placeholder: 'اكتب اسم الباب هنا...',
+                    'aria-label': 'صندوق إدخال اسم الباب'
+                }),
+                React.createElement('div', { className: 'modal-actions' },
+                    history.length > 0 && React.createElement('button', { className: 'back-button', onClick: handleBack }, 'عودة'),
+                    React.createElement('button', { className: 'section-button', onClick: handleCorrection }, 'تصحيح الإجابة')
+                )
+            );
+        }
+
+        if (stage === 'testHadith' && processedCardData) {
+            return React.createElement(React.Fragment, null,
+                React.createElement('h3', null, 'اكتب الحديث'),
+                React.createElement('div', { className: 'test-card-front' },
+                    React.createElement('span', { className: 'hadith-number' }, `حديث: ${toArabicNumerals(processedCardData.id)}`),
+                    React.createElement('div', { className: 'bab-name-wrapper' },
+                        React.createElement('span', { className: "bab-name" }, processedCardData.bab),
+                        processedCardData.babCount > 1 && React.createElement('span', { className: 'bab-number-badge' }, toArabicNumerals(processedCardData.babIndex))
+                    )
+                ),
+                React.createElement('textarea', {
+                    value: userInput,
+                    onChange: e => setUserInput(e.target.value),
+                    placeholder: 'اكتب الحديث هنا...',
+                    'aria-label': 'صندوق إدخال الحديث'
+                }),
+                React.createElement('div', { className: 'modal-actions' },
+                    history.length > 0 && React.createElement('button', { className: 'back-button', onClick: handleBack }, 'عودة'),
+                    React.createElement('button', { className: 'section-button', onClick: handleCorrection }, 'تصحيح الإجابة')
+                )
+            );
+        }
+
+        return null;
+    };
+
+    return React.createElement('div', { className: 'modal-overlay', onClick: onClose },
+        React.createElement('div', { className: 'modal-content', onClick: e => e.stopPropagation(), ref: modalRef, tabIndex: -1, role: 'dialog', 'aria-modal': true },
+            React.createElement('button', { className: 'modal-close-button', onClick: onClose, 'aria-label': 'إغلاق' }, '×'),
+            renderContent()
+        )
+    );
+};
+
 
 const TranscriptionModal = ({ cardData, onClose }) => {
     const [userInput, setUserInput] = useState('');
@@ -519,18 +716,6 @@ const TranscriptionModal = ({ cardData, onClose }) => {
     const handleTryAgain = () => {
         setComparison(null);
         setUserInput('');
-    };
-
-    const renderComparison = (diff, type) => {
-        if (!diff) return null;
-        return diff.map((part, index) => {
-            if (type === 'user' && part.type === 'missing') return null;
-            if (type === 'original' && part.type === 'added') return null;
-            
-            const className = `diff-${part.type}`;
-
-            return React.createElement('span', { key: index, className: className }, part.value + ' ');
-        });
     };
 
     return React.createElement('div', { className: 'modal-overlay', onClick: onClose },
@@ -631,6 +816,7 @@ const App = () => {
     const [currentBookIndex, setCurrentBookIndex] = useState(null);
     const [currentGroup, setCurrentGroup] = useState(null);
     const [currentGroupIndex, setCurrentGroupIndex] = useState(null);
+    const [isTestMode, setIsTestMode] = useState(false);
 
     useEffect(() => {
         fetch('./hadiths.json')
@@ -791,8 +977,20 @@ const App = () => {
         React.createElement('header', null,
             React.createElement('h1', null, "الجمع بين الصحيحين")
         ),
+         isTestMode && React.createElement(RecitationTestFlow, {
+            allHadiths: allHadiths,
+            processedHadiths: processedHadiths,
+            onClose: () => setIsTestMode(false)
+        }),
         React.createElement('main', { id: "content-area" },
             view === 'book-selection' && React.createElement('div', { className: "view active-view" },
+                React.createElement('div', { style: { marginBottom: '30px' } },
+                    React.createElement('button', { 
+                        className: "section-button info-button", 
+                        style: { flex: 'none', minWidth: '300px' },
+                        onClick: () => setIsTestMode(true) 
+                    }, "اختبار الحفظ")
+                ),
                 React.createElement('h2', null, "اختر كتابًا"),
                 React.createElement('div', { id: "section-buttons-container" },
                     uniqueBooks.map((book, index) =>
