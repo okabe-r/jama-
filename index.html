@@ -22,6 +22,7 @@
     --danger: #e74c3c;
     --danger-dark: #c0392b;
     --info: #3498db;
+    --info-dark: #2980b9;
     --card-bg: #ffffff;
     --card-border: #e0e0e0;
     --card-front-bg: #e8f5e9;
@@ -104,6 +105,12 @@ button {
     margin: 5px;
 }
 button:active { transform: scale(0.97); }
+button:disabled {
+    background-color: #bdc3c7;
+    cursor: not-allowed;
+    transform: none;
+}
+
 
 #section-buttons-container {
     display: flex;
@@ -123,12 +130,27 @@ button:active { transform: scale(0.97); }
 }
 .section-button:hover { background-color: var(--primary-dark); }
 
-.navigation-controls { margin-bottom: 20px; }
+.navigation-controls {
+    margin-bottom: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
 .back-button {
     background-color: var(--danger);
     color: white;
 }
 .back-button:hover { background-color: var(--danger-dark); }
+
+.info-button {
+    background-color: var(--info);
+    color: white;
+}
+.info-button:hover:not(:disabled) {
+    background-color: var(--info-dark);
+}
 
 #hadith-cards-container {
     display: flex;
@@ -606,7 +628,9 @@ const App = () => {
     const [error, setError] = useState(null);
     const [view, setView] = useState('book-selection');
     const [currentBookName, setCurrentBookName] = useState(null);
+    const [currentBookIndex, setCurrentBookIndex] = useState(null);
     const [currentGroup, setCurrentGroup] = useState(null);
+    const [currentGroupIndex, setCurrentGroupIndex] = useState(null);
 
     useEffect(() => {
         fetch('./hadiths.json')
@@ -696,13 +720,15 @@ const App = () => {
         );
     }
 
-    const handleBookClick = (bookName) => {
+    const handleBookClick = (bookName, index) => {
         setCurrentBookName(bookName);
+        setCurrentBookIndex(index);
         setView('group-selection');
     };
 
-    const handleGroupClick = (group) => {
+    const handleGroupClick = (group, index) => {
         setCurrentGroup(group);
+        setCurrentGroupIndex(index);
         setView('hadith-display');
         window.scrollTo(0, 0);
     };
@@ -710,12 +736,55 @@ const App = () => {
     const handleBackToBooks = () => {
         setView('book-selection');
         setCurrentBookName(null);
+        setCurrentBookIndex(null);
         setCurrentGroup(null);
+        setCurrentGroupIndex(null);
     };
     
     const handleBackToGroups = () => {
         setView('group-selection');
         setCurrentGroup(null);
+        setCurrentGroupIndex(null);
+    };
+
+    const handleNextGroup = () => {
+        if (currentGroupIndex < hadithGroups.length - 1) {
+            const newIndex = currentGroupIndex + 1;
+            setCurrentGroupIndex(newIndex);
+            setCurrentGroup(hadithGroups[newIndex]);
+            window.scrollTo(0, 0);
+        }
+    };
+    
+    const handlePreviousGroup = () => {
+        if (currentGroupIndex > 0) {
+            const newIndex = currentGroupIndex - 1;
+            setCurrentGroupIndex(newIndex);
+            setCurrentGroup(hadithGroups[newIndex]);
+            window.scrollTo(0, 0);
+        }
+    };
+
+    const handleNextBook = () => {
+        if (currentBookIndex < uniqueBooks.length - 1) {
+            const newIndex = currentBookIndex + 1;
+            setCurrentBookIndex(newIndex);
+            setCurrentBookName(uniqueBooks[newIndex]);
+            setCurrentGroup(null);
+            setCurrentGroupIndex(null);
+            window.scrollTo(0, 0);
+        }
+    };
+
+    const handlePreviousBook = () => {
+        if (currentBookIndex > 0) {
+            const newIndex = currentBookIndex - 1;
+            setCurrentBookIndex(newIndex);
+            setCurrentBookName(uniqueBooks[newIndex]);
+            setCurrentGroup(null);
+            setCurrentGroupIndex(null);
+            window.scrollTo(0, 0);
+        }
     };
 
     return React.createElement('div', { id: "app-container" },
@@ -726,22 +795,32 @@ const App = () => {
             view === 'book-selection' && React.createElement('div', { className: "view active-view" },
                 React.createElement('h2', null, "اختر كتابًا"),
                 React.createElement('div', { id: "section-buttons-container" },
-                    uniqueBooks.map(book =>
-                        React.createElement('button', { key: book, className: "section-button", onClick: () => handleBookClick(book) }, book)
+                    uniqueBooks.map((book, index) =>
+                        React.createElement('button', { key: book, className: "section-button", onClick: () => handleBookClick(book, index) }, book)
                     )
                 )
             ),
             view === 'group-selection' && React.createElement('div', { className: "view active-view" },
                 React.createElement('h2', null, currentBookName),
                  React.createElement('div', { className: "navigation-controls" },
-                    React.createElement('button', { className: "back-button", onClick: handleBackToBooks }, "← العودة للكتب")
+                    React.createElement('button', { className: "back-button", onClick: handleBackToBooks }, "← العودة للكتب"),
+                    React.createElement('button', {
+                        className: "info-button",
+                        onClick: handlePreviousBook,
+                        disabled: currentBookIndex === 0
+                    }, "الكتاب السابق"),
+                    React.createElement('button', {
+                        className: "info-button",
+                        onClick: handleNextBook,
+                        disabled: currentBookIndex >= uniqueBooks.length - 1
+                    }, "الكتاب التالي")
                 ),
                 React.createElement('div', { id: "section-buttons-container" },
-                    hadithGroups.map(group =>
+                    hadithGroups.map((group, index) =>
                         React.createElement('button', { 
                             key: `${group.start}-${group.end}`, 
                             className: "section-button", 
-                            onClick: () => handleGroupClick(group) 
+                            onClick: () => handleGroupClick(group, index) 
                         }, `الأحاديث ${toArabicNumerals(group.start)} - ${toArabicNumerals(group.end)}`)
                     )
                 )
@@ -749,7 +828,17 @@ const App = () => {
             view === 'hadith-display' && React.createElement('div', { className: "view active-view" },
                 React.createElement('h2', null, `${currentBookName} (الأحاديث ${toArabicNumerals(currentGroup.start)} - ${toArabicNumerals(currentGroup.end)})`),
                 React.createElement('div', { className: "navigation-controls" },
-                    React.createElement('button', { className: "back-button", onClick: handleBackToGroups }, "← العودة للمجموعات")
+                    React.createElement('button', { className: "back-button", onClick: handleBackToGroups }, "← العودة للمجموعات"),
+                    React.createElement('button', { 
+                        className: "info-button", 
+                        onClick: handlePreviousGroup,
+                        disabled: currentGroupIndex === 0
+                    }, "المجموعة السابقة"),
+                    React.createElement('button', { 
+                        className: "info-button", 
+                        onClick: handleNextGroup,
+                        disabled: currentGroupIndex >= hadithGroups.length - 1
+                    }, "المجموعة التالية")
                 ),
                 React.createElement('div', { id: "hadith-cards-container" },
                     hadithsForCurrentGroup.map(card =>
