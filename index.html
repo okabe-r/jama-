@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -508,7 +509,7 @@ const diffWords = (oldStr, newStr) => {
         }
     }
 
-    let wordDiffs = [];
+    let rawDiffs = [];
     let i = m, j = n;
     while (i > 0 || j > 0) {
         const w1 = i > 0 ? normalizeWordForDiff(oldWords[i - 1]) : null;
@@ -518,14 +519,14 @@ const diffWords = (oldStr, newStr) => {
         const rawW2 = j > 0 ? newWords[j-1] : null;
 
         if (i > 0 && j > 0 && ( (w1 === w2 && w1 !== '') || (w1 === '' && w2 === '' && rawW1 === rawW2) )) {
-            wordDiffs.unshift({ value: rawW1, type: 'correct' });
+            rawDiffs.unshift({ value: rawW1, type: 'correct' });
             i--;
             j--;
         } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-            wordDiffs.unshift({ value: rawW2, type: 'added' });
+            rawDiffs.unshift({ value: rawW2, type: 'added' });
             j--;
         } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
-            wordDiffs.unshift({ value: rawW1, type: 'missing' });
+            rawDiffs.unshift({ value: rawW1, type: 'missing' });
             i--;
         } else {
             // Fallback for safety, though condition above should cover it
@@ -533,37 +534,53 @@ const diffWords = (oldStr, newStr) => {
         }
     }
     
-    // Post-process: treat missing/added punctuation as correct (ignored)
-    wordDiffs = wordDiffs.map(part => {
-        if ((part.type === 'missing' || part.type === 'added') && normalizeWordForDiff(part.value) === '') {
-            return { ...part, type: 'correct' };
+    // Grouping First - to combine adjacent parts of the same type, preventing fragmentation of missing blocks by ignored characters
+    const groupedDiffs = [];
+    if (rawDiffs.length > 0) {
+        let currentPart = { ...rawDiffs[0] };
+        for (let k = 1; k < rawDiffs.length; k++) {
+            const nextPart = rawDiffs[k];
+            if (nextPart.type === currentPart.type) {
+                currentPart.value += ' ' + nextPart.value;
+            } else {
+                groupedDiffs.push(currentPart);
+                currentPart = { ...nextPart };
+            }
         }
-        return part;
-    });
-
-    if (wordDiffs.length === 0) {
-         // Fallback if inputs were empty
+        groupedDiffs.push(currentPart);
+    } else {
+        // Fallback if inputs were empty
         const result = [];
         if (oldWords.length > 0) result.push({ value: oldWords.join(' '), type: 'missing'});
         if (newWords.length > 0) result.push({ value: newWords.join(' '), type: 'added'});
         return result;
     }
 
-    const groupedResult = [];
-    let currentPart = { ...wordDiffs[0] };
-
-    for (let k = 1; k < wordDiffs.length; k++) {
-        const nextPart = wordDiffs[k];
-        if (nextPart.type === currentPart.type) {
-            currentPart.value += ' ' + nextPart.value;
-        } else {
-            groupedResult.push(currentPart);
-            currentPart = { ...nextPart };
+    // Post-process: treat missing/added punctuation as correct (ignored) IF the whole block is ignorable
+    const processedDiffs = groupedDiffs.map(part => {
+        if ((part.type === 'missing' || part.type === 'added') && normalizeWordForDiff(part.value) === '') {
+            return { ...part, type: 'correct' };
         }
-    }
-    groupedResult.push(currentPart);
+        return part;
+    });
 
-    return groupedResult;
+    // Re-group to merge adjacent correct blocks created by post-processing for cleaner DOM
+    const finalResult = [];
+    if (processedDiffs.length > 0) {
+        let currentPart = { ...processedDiffs[0] };
+        for (let k = 1; k < processedDiffs.length; k++) {
+            const nextPart = processedDiffs[k];
+            if (nextPart.type === currentPart.type) {
+                currentPart.value += ' ' + nextPart.value;
+            } else {
+                finalResult.push(currentPart);
+                currentPart = { ...nextPart };
+            }
+        }
+        finalResult.push(currentPart);
+    }
+
+    return finalResult;
 };
 
 const TooltipPortal = ({ text, targetRect, onEnter, onLeave }) => {
