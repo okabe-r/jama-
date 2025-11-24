@@ -11,8 +11,8 @@
 {
   "imports": {
     "react": "https://esm.sh/react@18.2.0",
-    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/"
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client"
   }
 }
 </script>
@@ -380,8 +380,48 @@ button:disabled {
 }
 
 .diff-correct { color: var(--diff-correct); }
-.diff-missing { background-color: var(--diff-missing-bg); color: var(--diff-missing-text); text-decoration: line-through; padding: 2px 4px; border-radius: 3px;}
 .diff-added { background-color: var(--diff-added-bg); color: var(--diff-added-text); padding: 2px 4px; border-radius: 3px; }
+
+/* New Missing Marker Styles */
+.diff-missing-marker {
+    color: var(--danger);
+    font-weight: bold;
+    cursor: help;
+    margin: 0 3px;
+    position: relative;
+    display: inline-block;
+    font-family: serif;
+    font-size: 1.2em;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+/* Tooltip styles */
+.custom-tooltip {
+    position: fixed;
+    background-color: #333;
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-family: 'Noto Naskh Arabic', sans-serif;
+    line-height: 1.5;
+    max-width: 300px;
+    width: max-content;
+    text-align: center;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    z-index: 9999;
+    direction: rtl;
+    pointer-events: auto; 
+}
+.custom-tooltip::-webkit-scrollbar { width: 6px; }
+.custom-tooltip::-webkit-scrollbar-thumb { background: #666; border-radius: 3px; }
+.custom-tooltip::-webkit-scrollbar-track { background: #333; }
+
+.reference-text {
+    color: #000;
+    font-weight: 500;
+}
 
 .test-card-front {
     border: 1px solid var(--card-front-border);
@@ -419,8 +459,9 @@ footer {
 <script type="module">
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { createPortal } from 'react-dom';
 
-const { useState, useMemo, useEffect, useRef } = React;
+const { useState, useMemo, useEffect, useRef, useLayoutEffect } = React;
 
 const toArabicNumerals = (num) => {
     const arabicNumerals = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
@@ -442,11 +483,12 @@ const diffWords = (oldStr, newStr) => {
     const cleanOldStr = oldStr.replace(/<br\s*\/?>/gi, " ");
     const cleanNewStr = newStr.replace(/<br\s*\/?>/gi, " ");
 
-    const punctuationRegex = /[.,()\[\]\/#!$؟%\^&\*;:{}=_`~،؛«»﴿﴾ﷺ●-]/g;
+    const punctuationRegex = /[.,()\[\]\/#!$؟%\^&\*;:{}=_`~،؛«»﴿﴾ﷺ●\-\u2013\u2014]/g;
     const normalizeWordForDiff = (word) => normalizeArabic(word).replace(punctuationRegex, '');
 
-    const oldWords = cleanOldStr.split(/\s+/).filter(Boolean);
-    const newWords = cleanNewStr.split(/\s+/).filter(Boolean);
+    // Keep all tokens, even if they are just punctuation
+    const oldWords = cleanOldStr.split(/\s+/).filter(word => word.length > 0);
+    const newWords = cleanNewStr.split(/\s+/).filter(word => word.length > 0);
 
     const m = oldWords.length;
     const n = newWords.length;
@@ -454,7 +496,11 @@ const diffWords = (oldStr, newStr) => {
 
     for (let i = 1; i <= m; i++) {
         for (let j = 1; j <= n; j++) {
-            if (normalizeWordForDiff(oldWords[i - 1]) === normalizeWordForDiff(newWords[j - 1])) {
+            const w1 = normalizeWordForDiff(oldWords[i - 1]);
+            const w2 = normalizeWordForDiff(newWords[j - 1]);
+            
+            // If match or if both are punctuation/empty after normalization (effectively ignored chars match)
+            if (w1 === w2 && (w1 !== '' || oldWords[i-1] === newWords[j-1])) {
                 dp[i][j] = dp[i - 1][j - 1] + 1;
             } else {
                 dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
@@ -462,25 +508,41 @@ const diffWords = (oldStr, newStr) => {
         }
     }
 
-    const wordDiffs = [];
+    let wordDiffs = [];
     let i = m, j = n;
     while (i > 0 || j > 0) {
-        if (i > 0 && j > 0 && normalizeWordForDiff(oldWords[i - 1]) === normalizeWordForDiff(newWords[j - 1])) {
-            wordDiffs.unshift({ value: oldWords[i - 1], type: 'correct' });
+        const w1 = i > 0 ? normalizeWordForDiff(oldWords[i - 1]) : null;
+        const w2 = j > 0 ? normalizeWordForDiff(newWords[j - 1]) : null;
+        
+        const rawW1 = i > 0 ? oldWords[i-1] : null;
+        const rawW2 = j > 0 ? newWords[j-1] : null;
+
+        if (i > 0 && j > 0 && ( (w1 === w2 && w1 !== '') || (w1 === '' && w2 === '' && rawW1 === rawW2) )) {
+            wordDiffs.unshift({ value: rawW1, type: 'correct' });
             i--;
             j--;
         } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-            wordDiffs.unshift({ value: newWords[j - 1], type: 'added' });
+            wordDiffs.unshift({ value: rawW2, type: 'added' });
             j--;
         } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
-            wordDiffs.unshift({ value: oldWords[i - 1], type: 'missing' });
+            wordDiffs.unshift({ value: rawW1, type: 'missing' });
             i--;
         } else {
+            // Fallback for safety, though condition above should cover it
             break;
         }
     }
     
+    // Post-process: treat missing/added punctuation as correct (ignored)
+    wordDiffs = wordDiffs.map(part => {
+        if ((part.type === 'missing' || part.type === 'added') && normalizeWordForDiff(part.value) === '') {
+            return { ...part, type: 'correct' };
+        }
+        return part;
+    });
+
     if (wordDiffs.length === 0) {
+         // Fallback if inputs were empty
         const result = [];
         if (oldWords.length > 0) result.push({ value: oldWords.join(' '), type: 'missing'});
         if (newWords.length > 0) result.push({ value: newWords.join(' '), type: 'added'});
@@ -504,15 +566,134 @@ const diffWords = (oldStr, newStr) => {
     return groupedResult;
 };
 
-const renderComparison = (diff, type) => {
-    if (!diff) return null;
-    return diff.map((part, index) => {
-        if (type === 'user' && part.type === 'missing') return null;
-        if (type === 'original' && part.type === 'added') return null;
-        
-        const className = `diff-${part.type}`;
+const TooltipPortal = ({ text, targetRect, onEnter, onLeave }) => {
+    const tooltipRef = useRef(null);
+    const [style, setStyle] = useState({ opacity: 0 }); 
 
-        return React.createElement('span', { key: index, className: className }, part.value + ' ');
+    useLayoutEffect(() => {
+        if (tooltipRef.current && targetRect) {
+            const rect = tooltipRef.current.getBoundingClientRect();
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+
+            let top = targetRect.top - rect.height - 8; 
+            let left = targetRect.left + (targetRect.width / 2) - (rect.width / 2);
+
+            // Flip to bottom if not enough space top
+            if (top < 10) {
+                top = targetRect.bottom + 8;
+            }
+
+            // Constrain horizontal
+            if (left < 10) left = 10;
+            if (left + rect.width > viewportWidth - 10) {
+                left = viewportWidth - rect.width - 10;
+            }
+            
+            // Constrain vertical logic
+            const availableHeight = viewportHeight - 20;
+            let maxHeight = 'none';
+            
+            if (top < 10) top = 10;
+            if (top + rect.height > viewportHeight - 10) {
+                 if (rect.height > availableHeight) {
+                     top = 10;
+                     maxHeight = availableHeight + 'px';
+                 } else {
+                     top = viewportHeight - rect.height - 10;
+                 }
+            }
+
+            setStyle({
+                top: top + 'px',
+                left: left + 'px',
+                opacity: 1,
+                maxHeight: maxHeight,
+                overflowY: maxHeight !== 'none' ? 'auto' : 'visible'
+            });
+        }
+    }, [targetRect, text]);
+
+    return createPortal(
+        React.createElement('div', {
+            className: 'custom-tooltip',
+            ref: tooltipRef,
+            style: style,
+            onMouseEnter: onEnter,
+            onMouseLeave: onLeave
+        }, text),
+        document.body
+    );
+};
+
+const TooltipMarker = ({ text }) => {
+    const [isHovered, setIsHovered] = useState(false);
+    const [rect, setRect] = useState(null);
+    const spanRef = useRef(null);
+    const timerRef = useRef(null);
+
+    const handleEnter = () => {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        if (spanRef.current) {
+            setRect(spanRef.current.getBoundingClientRect());
+            setIsHovered(true);
+        }
+    };
+
+    const handleLeave = () => {
+        timerRef.current = setTimeout(() => {
+            setIsHovered(false);
+        }, 100); 
+    };
+
+    useEffect(() => {
+        return () => {
+            if (timerRef.current) clearTimeout(timerRef.current);
+        };
+    }, []);
+
+    return React.createElement(React.Fragment, null,
+        React.createElement('span', {
+            className: 'diff-missing-marker',
+            ref: spanRef,
+            onMouseEnter: handleEnter,
+            onMouseLeave: handleLeave,
+            onTouchStart: handleEnter,
+            onTouchEnd: handleLeave
+        }, '✽'),
+        isHovered && rect && React.createElement(TooltipPortal, { 
+            text, 
+            targetRect: rect,
+            onEnter: handleEnter,
+            onLeave: handleLeave
+        })
+    );
+};
+
+const renderComparison = (diff, mode) => {
+    if (!diff) return null;
+
+    if (mode === 'reference') {
+        const text = diff
+            .filter(part => part.type !== 'added')
+            .map(part => part.value)
+            .join(' ');
+        return React.createElement('div', { className: 'reference-text' }, text);
+    }
+
+    // mode === 'feedback'
+    return diff.map((part, index) => {
+        if (part.type === 'correct') {
+            return React.createElement('span', { key: index, className: 'diff-correct' }, part.value + ' ');
+        } else if (part.type === 'added') {
+            return React.createElement('span', { key: index, className: 'diff-added' }, part.value + ' ');
+        } else if (part.type === 'missing') {
+            return React.createElement(TooltipMarker, { 
+                key: index, 
+                text: part.value 
+            });
+        }
+        return null;
     });
 };
 
@@ -525,17 +706,28 @@ const RecitationTestFlow = ({ allHadiths, processedHadiths, onClose }) => {
     const [comparison, setComparison] = useState(null);
     const modalRef = useRef(null);
     const [history, setHistory] = useState([]);
+    
+    // Store scroll position to restore later
+    const scrollPosRef = useRef(0);
 
     useEffect(() => {
+        scrollPosRef.current = window.scrollY;
+        document.body.style.overflow = 'hidden';
+        
+        if (modalRef.current) modalRef.current.focus({ preventScroll: true });
+        
         const handleKeyDown = (event) => {
             if (event.key === 'Escape') onClose();
         };
         window.addEventListener('keydown', handleKeyDown);
-        document.body.style.overflow = 'hidden';
-        if (modalRef.current) modalRef.current.focus();
+
         return () => {
             window.removeEventListener('keydown', handleKeyDown);
             document.body.style.overflow = 'auto';
+            // Restore scroll slightly later to allow layout to settle
+            setTimeout(() => {
+                window.scrollTo(0, scrollPosRef.current);
+            }, 0);
         };
     }, [onClose]);
 
@@ -620,13 +812,13 @@ const RecitationTestFlow = ({ allHadiths, processedHadiths, onClose }) => {
         }
 
         if (comparison) {
-            const originalTextLabel = stage === 'testBab' ? 'اسم الباب الصحيح' : 'الإجابة الصحيحة (بدون حركات)';
+            const originalTextLabel = stage === 'testBab' ? 'اسم الباب الصحيح' : 'الإجابة الصحيحة';
             const nextButtonText = stage === 'testBab' ? 'الحديث التالي' : (isLastHadithInBab ? 'الباب التالي' : 'الحديث التالي');
             return React.createElement('div', { className: 'comparison-view' },
-                React.createElement('h4', null, 'إجابتك'),
-                React.createElement('p', null, renderComparison(comparison, 'user')),
+                React.createElement('h4', null, 'إجابتك (مع التصحيح)'),
+                React.createElement('p', null, renderComparison(comparison, 'feedback')),
                 React.createElement('h4', null, originalTextLabel),
-                React.createElement('p', null, renderComparison(comparison, 'original')),
+                React.createElement('div', null, renderComparison(comparison, 'reference')),
                 React.createElement('div', { className: 'modal-actions' },
                     React.createElement('button', { className: 'info-button', onClick: handleTryAgain }, 'حاول مرة أخرى'),
                     React.createElement('button', { className: 'section-button', onClick: handleNext }, nextButtonText)
@@ -676,11 +868,14 @@ const RecitationTestFlow = ({ allHadiths, processedHadiths, onClose }) => {
         return null;
     };
 
-    return React.createElement('div', { className: 'modal-overlay', onClick: onClose },
-        React.createElement('div', { className: 'modal-content', onClick: e => e.stopPropagation(), ref: modalRef, tabIndex: -1, role: 'dialog', 'aria-modal': true },
-            React.createElement('button', { className: 'modal-close-button', onClick: onClose, 'aria-label': 'إغلاق' }, '×'),
-            renderContent()
-        )
+    return createPortal(
+        React.createElement('div', { className: 'modal-overlay', onClick: onClose },
+            React.createElement('div', { className: 'modal-content', onClick: e => e.stopPropagation(), ref: modalRef, tabIndex: -1, role: 'dialog', 'aria-modal': true },
+                React.createElement('button', { className: 'modal-close-button', onClick: onClose, 'aria-label': 'إغلاق' }, '×'),
+                renderContent()
+            )
+        ),
+        document.body
     );
 };
 
@@ -689,23 +884,30 @@ const TranscriptionModal = ({ cardData, onClose }) => {
     const [userInput, setUserInput] = useState('');
     const [comparison, setComparison] = useState(null);
     const modalRef = useRef(null);
+    const scrollPosRef = useRef(0);
 
     useEffect(() => {
+        scrollPosRef.current = window.scrollY;
+        document.body.style.overflow = 'hidden';
+
+        if (modalRef.current) {
+            modalRef.current.focus({ preventScroll: true });
+        }
+        
         const handleKeyDown = (event) => {
             if (event.key === 'Escape') {
                 onClose();
             }
         };
         window.addEventListener('keydown', handleKeyDown);
-        document.body.style.overflow = 'hidden';
         
-        if (modalRef.current) {
-            modalRef.current.focus();
-        }
-
         return () => {
             window.removeEventListener('keydown', handleKeyDown);
             document.body.style.overflow = 'auto';
+            // Use setTimeout to ensure the layout has recalculated after overflow removal
+            setTimeout(() => {
+                window.scrollTo(0, scrollPosRef.current);
+            }, 0);
         };
     }, [onClose]);
 
@@ -719,35 +921,38 @@ const TranscriptionModal = ({ cardData, onClose }) => {
         setUserInput('');
     };
 
-    return React.createElement('div', { className: 'modal-overlay', onClick: onClose },
-        React.createElement('div', { className: 'modal-content', onClick: e => e.stopPropagation(), ref: modalRef, tabIndex: -1, role: 'dialog', 'aria-modal': true },
-            React.createElement('button', { className: 'modal-close-button', onClick: onClose, 'aria-label': 'إغلاق' }, '×'),
-            React.createElement('h3', null, 'اكتب الحديث'),
-            React.createElement('p', { className: 'bab-reference' }, cardData.bab),
-            !comparison ? (
-                React.createElement(React.Fragment, null,
-                    React.createElement('textarea', {
-                        value: userInput,
-                        onChange: e => setUserInput(e.target.value),
-                        placeholder: 'اكتب الحديث هنا...',
-                        'aria-label': 'صندوق إدخال الحديث'
-                    }),
-                    React.createElement('div', { className: 'modal-actions' },
-                        React.createElement('button', { className: 'section-button', onClick: handleCorrection }, 'تصحيح الإجابة')
+    return createPortal(
+        React.createElement('div', { className: 'modal-overlay', onClick: onClose },
+            React.createElement('div', { className: 'modal-content', onClick: e => e.stopPropagation(), ref: modalRef, tabIndex: -1, role: 'dialog', 'aria-modal': true },
+                React.createElement('button', { className: 'modal-close-button', onClick: onClose, 'aria-label': 'إغلاق' }, '×'),
+                React.createElement('h3', null, 'اكتب الحديث'),
+                React.createElement('p', { className: 'bab-reference' }, cardData.bab),
+                !comparison ? (
+                    React.createElement(React.Fragment, null,
+                        React.createElement('textarea', {
+                            value: userInput,
+                            onChange: e => setUserInput(e.target.value),
+                            placeholder: 'اكتب الحديث هنا...',
+                            'aria-label': 'صندوق إدخال الحديث'
+                        }),
+                        React.createElement('div', { className: 'modal-actions' },
+                            React.createElement('button', { className: 'section-button', onClick: handleCorrection }, 'تصحيح الإجابة')
+                        )
                     )
-                )
-            ) : (
-                React.createElement('div', { className: 'comparison-view' },
-                    React.createElement('h4', null, 'إجابتك'),
-                    React.createElement('p', null, renderComparison(comparison, 'user')),
-                    React.createElement('h4', null, 'الإجابة الصحيحة (بدون حركات)'),
-                    React.createElement('p', null, renderComparison(comparison, 'original')),
-                    React.createElement('div', { className: 'modal-actions' },
-                        React.createElement('button', { className: 'section-button', onClick: handleTryAgain }, 'حاول مرة أخرى')
+                ) : (
+                    React.createElement('div', { className: 'comparison-view' },
+                        React.createElement('h4', null, 'إجابتك (مع التصحيح)'),
+                        React.createElement('p', null, renderComparison(comparison, 'feedback')),
+                        React.createElement('h4', null, 'الإجابة الصحيحة'),
+                        React.createElement('div', null, renderComparison(comparison, 'reference')),
+                        React.createElement('div', { className: 'modal-actions' },
+                            React.createElement('button', { className: 'section-button', onClick: handleTryAgain }, 'حاول مرة أخرى')
+                        )
                     )
                 )
             )
-        )
+        ),
+        document.body
     );
 };
 
